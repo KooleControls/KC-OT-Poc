@@ -33,6 +33,10 @@ SECTIONS
         KEEP(*(.crp))
         ASSERT(. == 0x300, "CRP word is not exactly one word at 0x2FC");
 
+        /* The image's identity, read by the gateway over ISP (see ImageInfo.c). */
+        KEEP(*(.image_info))
+        ASSERT(. == 0x320, "image info is not exactly 32 bytes at 0x300");
+
         *(.text*)
         *(.rodata*)
 

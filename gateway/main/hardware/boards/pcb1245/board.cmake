@@ -15,4 +15,5 @@ list(APPEND BOARD_SOURCES
     "${_drivers}/Max14830/Max14830.cpp"
     "${_drivers}/Max14830/Max14830Uart.cpp"
     "${_drivers}/Esp32Ethernet.cpp"
+    "${_drivers}/LpcIsp/LpcIsp.cpp"
 )

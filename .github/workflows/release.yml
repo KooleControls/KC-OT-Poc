@@ -1,0 +1,156 @@
+name: Release
+
+# One build, both boards, in dependency order:
+#
+#   opentherm/  (Arm GNU)   ->  opentherm.bin
+#   gateway/    (ESP-IDF)   ->  the app image, with opentherm.bin linked INTO it
+#
+# The gateway's ModuleFirmwareManager flashes the PCB1246 from that embedded copy
+# whenever the module runs anything else, so one OTA of the gateway app updates both
+# boards. The PCB1246 files are published as well, for flashing a module by hand.
+#
+#   push a tag v1.2.0 (or v1.2.0-rc.1)  ->  build, and publish a GitHub release
+#                                            (an -rc tag is a pre-release)
+#   Run workflow (manual)               ->  build only; the files are the run's artifacts
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+env:
+  IDF_VERSION: "v6.0"
+  BOARD: pcb1245
+  TARGET: esp32
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Both firmwares take their version from `git describe --tags`. A shallow
+          # checkout has no tags, and the fallback (0.0.0-dev) is silent.
+          fetch-depth: 0
+
+      # An RC and its final release can sit on one commit, and `git describe` would
+      # pick either. Only the tag being built may be visible to it.
+      - name: Hide other tags on this commit
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: git tag --points-at HEAD | grep -vx "$GITHUB_REF_NAME" | xargs -r git tag -d
+
+      # ── PCB1246 ───────────────────────────────────────────────
+      - name: Arm GNU toolchain
+        uses: carlosperate/arm-none-eabi-gcc-action@v1
+        with:
+          release: "14.2.Rel1"   # what opentherm/ is built with locally
+
+      - name: Ninja
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+      - name: Build PCB1246 firmware
+        run: |
+          set -euo pipefail
+          cmake -S opentherm -B opentherm/build -G Ninja
+          cmake --build opentherm/build
+
+      # ── Gateway ───────────────────────────────────────────────
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          package_json_file: gateway/frontend/package.json
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: gateway/frontend/pnpm-lock.yaml
+
+      # The ESP-IDF container has no pnpm, so the frontend is built here, into
+      # gateway/www/, and the firmware build packs what it finds there.
+      - name: Build frontend
+        run: cd gateway/frontend && pnpm install --frozen-lockfile && pnpm build
+
+      - name: Build gateway firmware (ESP-IDF)
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: ${{ env.IDF_VERSION }}
+          target: ${{ env.TARGET }}
+          path: gateway
+          command: |
+            set -euo pipefail
+            # The container runs as root over a checkout owned by the runner, so git
+            # refuses it as "dubious ownership" -- and the version lookup swallows that.
+            git config --global --add safe.directory '*'
+            # REQUIRED: a release that quietly stopped carrying the PCB1246 image would
+            # look fine until a module needed updating.
+            idf.py -DBOARD=${{ env.BOARD }} -DPCB1246_FIRMWARE_REQUIRED=ON set-target ${{ env.TARGET }}
+            idf.py -DBOARD=${{ env.BOARD }} -DPCB1246_FIRMWARE_REQUIRED=ON build
+            idf.py -DBOARD=${{ env.BOARD }} merge-bin -o merged-factory.bin -f raw
+
+      # A release numbered 0.0.0-dev is worse than a failed build, and every way of
+      # losing the version is quiet. Both boards must say what the tag says.
+      - name: Check both versions are the tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#v}"
+          tag="${tag%-rc.*}"   # an RC builds as the version it is a candidate for
+          gateway=$(python3 -c "import json; print(json.load(open('gateway/build/project_description.json'))['project_version'])")
+          module=$(python3 -c "d=open('opentherm/build/opentherm.bin','rb').read(); print(d[0x30C:0x320].split(b'\0')[0].decode())")
+          echo "tag $tag, gateway $gateway, PCB1246 $module"
+          [ "$gateway" = "$tag" ] || { echo "::error::gateway reports '$gateway', tag is '$tag'"; exit 1; }
+          [ "$module" = "$tag" ]  || { echo "::error::PCB1246 reports '$module', tag is '$tag'"; exit 1; }
+
+      - name: Collect files
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          name="KC-OT-Poc"
+          cp gateway/build/merged-factory.bin "dist/$name-gateway-factory.bin"
+          cp gateway/build/Strux.bin          "dist/$name-gateway-app.bin"
+          cp opentherm/build/opentherm.bin    "dist/$name-pcb1246.bin"
+          cp opentherm/build/opentherm.hex    "dist/$name-pcb1246.hex"
+          (cd dist && sha256sum *) | tee dist/SHA256SUMS
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware
+          path: dist/
+          if-no-files-found: error
+
+      - name: Release notes
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          {
+            echo "### Files"
+            echo
+            echo "- **\`KC-OT-Poc-gateway-app.bin\`**: the gateway application, for an OTA. It carries the PCB1246 firmware below and puts it on the module at the next boot (\`module status\` shows how that went)."
+            echo "- **\`KC-OT-Poc-gateway-factory.bin\`**: bootloader, partition table and app in one image, for a first flash or a recovery: \`esptool write-flash 0x0 <file>\`."
+            echo "- **\`KC-OT-Poc-pcb1246.bin\` / \`.hex\`**: the PCB1246 firmware on its own, for flashing a module by hand (SWD or ISP). The gateway does not need these."
+            echo
+            echo "Commit \`$(git rev-parse --short HEAD)\`."
+            echo
+            echo '```'
+            cat dist/SHA256SUMS
+            echo '```'
+          } > release-notes.md
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          body_path: release-notes.md
+          generate_release_notes: true
+          files: |
+            dist/*.bin
+            dist/*.hex
+            dist/SHA256SUMS

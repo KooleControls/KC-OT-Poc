@@ -122,11 +122,14 @@ target_link_options(${FIRMWARE} PRIVATE
 )
 
 # The LPC boot ROM only starts an image whose vector table checksums to zero, so it is
-# patched into the ELF before the hex and bin are made from it.
+# patched into the ELF first. Then the .bin, whose length and CRC go into the image
+# info (ImageInfo.c) of both the .bin and the ELF, and only then the .hex, so all three
+# carry the same image.
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_custom_command(TARGET ${FIRMWARE} POST_BUILD
     COMMAND Python3::Interpreter "${PROJECT_SOURCE_DIR}/tools/lpc_checksum.py" "$<TARGET_FILE:${FIRMWARE}>"
-    COMMAND "${CMAKE_OBJCOPY}" -O ihex "$<TARGET_FILE:${FIRMWARE}>" "${CMAKE_BINARY_DIR}/${FIRMWARE}.hex"
     COMMAND "${CMAKE_OBJCOPY}" -O binary "$<TARGET_FILE:${FIRMWARE}>" "${CMAKE_BINARY_DIR}/${FIRMWARE}.bin"
+    COMMAND Python3::Interpreter "${PROJECT_SOURCE_DIR}/tools/lpc_image_info.py" "$<TARGET_FILE:${FIRMWARE}>" "${CMAKE_BINARY_DIR}/${FIRMWARE}.bin"
+    COMMAND "${CMAKE_OBJCOPY}" -O ihex "$<TARGET_FILE:${FIRMWARE}>" "${CMAKE_BINARY_DIR}/${FIRMWARE}.hex"
     COMMAND "${CMAKE_SIZE}" "$<TARGET_FILE:${FIRMWARE}>"
     VERBATIM)

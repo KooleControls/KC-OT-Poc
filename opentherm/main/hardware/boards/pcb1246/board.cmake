@@ -18,6 +18,7 @@ set(_cpu -mcpu=cortex-m0plus -mthumb)
 list(APPEND BOARD_SOURCES
     "${CMAKE_CURRENT_LIST_DIR}/startup_LPC11U68.c"
     "${CMAKE_CURRENT_LIST_DIR}/system_LPC11U6x.c"
+    "${CMAKE_CURRENT_LIST_DIR}/ImageInfo.c"
     "${CMAKE_CURRENT_LIST_DIR}/BoardContext.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/../../drivers/LpcUart0.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/../../drivers/ManchesterLine.cpp"

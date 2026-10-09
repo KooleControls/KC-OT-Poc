@@ -40,6 +40,7 @@ set(STRUX_SOURCES
 # ── The application. This is the list a fork owns.
 set(APP_SOURCES
     "app/LedManager/LedManager.cpp"
+    "app/ModuleFirmwareManager/ModuleFirmwareManager.cpp"
 )
 
 set(SOURCE_FILES_LIST
@@ -75,6 +76,7 @@ set(INCLUDE_DIRS_LIST
     "hardware"
     "app"
     "app/LedManager"
+    "app/ModuleFirmwareManager"
 )
 
 set(COMPONENT_REQUIRES
@@ -158,13 +160,48 @@ set(PACK_SCRIPT    "${CMAKE_CURRENT_LIST_DIR}/strux/WebAssets/pack_web_assets.py
 set(WEB_ASSETS_BIN "${CMAKE_CURRENT_BINARY_DIR}/web_assets.bin")
 set(FRONTEND_STAMP "${CMAKE_CURRENT_BINARY_DIR}/frontend.stamp")
 
+# ── The PCB1246 firmware ──────────────────────────────────────
+# The OpenTherm module's .bin rides inside this app image, so one OTA updates both
+# boards: ModuleFirmwareManager flashes the module with it over ISP whenever the module
+# runs anything else. Built first, by the opentherm/ project next to this one.
+#
+# Copied to a fixed name so the linker symbols are fixed too
+# (_binary_pcb1246_bin_start). configure_file makes the copy a configure dependency,
+# so rebuilding the LPC and then the gateway picks the new image up.
+#
+# Missing is a warning for a developer build -- the gateway then leaves the module as
+# it is -- and an error when PCB1246_FIRMWARE_REQUIRED is set, which the release
+# workflow does: a release that silently stopped carrying the module's firmware would
+# look fine until a board needed it.
+set(PCB1246_FIRMWARE "${CMAKE_CURRENT_LIST_DIR}/../../opentherm/build/opentherm.bin"
+    CACHE FILEPATH "The PCB1246 firmware image to embed")
+option(PCB1246_FIRMWARE_REQUIRED "Fail the build when the PCB1246 image is missing" OFF)
+
+set(PCB1246_EMBED "")
+if(EXISTS "${PCB1246_FIRMWARE}")
+    set(PCB1246_EMBED "${CMAKE_CURRENT_BINARY_DIR}/pcb1246.bin")
+    if(NOT CMAKE_BUILD_EARLY_EXPANSION)
+        configure_file("${PCB1246_FIRMWARE}" "${PCB1246_EMBED}" COPYONLY)
+    endif()
+elseif(PCB1246_FIRMWARE_REQUIRED)
+    message(FATAL_ERROR "PCB1246 firmware not found at ${PCB1246_FIRMWARE} - build opentherm/ first")
+elseif(NOT CMAKE_BUILD_EARLY_EXPANSION)
+    message(WARNING "PCB1246 firmware not found at ${PCB1246_FIRMWARE} - this build will not update the module")
+endif()
+
 # Register component with ESP-IDF
 idf_component_register(
     SRCS ${SOURCE_FILES_LIST}
     INCLUDE_DIRS ${INCLUDE_DIRS_LIST}
     REQUIRES ${COMPONENT_REQUIRES}
-    EMBED_FILES ${WEB_ASSETS_BIN}
+    EMBED_FILES ${WEB_ASSETS_BIN} ${PCB1246_EMBED}
 )
+
+if(PCB1246_EMBED)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE PCB1246_FIRMWARE_EMBEDDED=1)
+else()
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE PCB1246_FIRMWARE_EMBEDDED=0)
+endif()
 
 # Board identity define for the (rare) code-level conditionals.
 string(TOUPPER "${BOARD}" BOARD_UPPER)

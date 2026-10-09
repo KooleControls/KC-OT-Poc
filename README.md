@@ -12,6 +12,7 @@ Decided so far:
 - The gateway and the PCB1246 talk over the UART using the Strux channel protocol instead of KC2.
 - On the UART, each channel frame is COBS-framed with a CRC-16: `0x00 | COBS(frame | crc16) | 0x00`. A frame that fails the check is dropped and counted. The code is `lib/protocol/SerialFraming.h`, meant to be the same file on both sides.
 - The PCB1246 is a modem and does not look inside a frame. Frames from either line go to the gateway on a stream the PCB1246 opens (`opentherm stream`); the gateway sends with `opentherm send side=<thermostat|boiler> frame=<uint32>`. Everything else is the gateway's.
+- The gateway keeps the PCB1246's firmware up to date. A release builds `opentherm/` first and links its `.bin` into the gateway app, so one gateway OTA updates both boards. At boot, `ModuleFirmwareManager` resets the module into its ISP bootloader and compares the 32-byte image info at 0x300 (version, length, CRC-32, written by `tools/lpc_image_info.py`) with the image it carries. On a mismatch it flashes, with page 0 written last. `module status` / `module update`; the `module.update` setting turns the boot check off.
 - What the proof of concept does with OpenTherm is still open.
 
 ## Build
@@ -32,4 +33,10 @@ cmake -S . -B build -G Ninja
 cmake --build build
 ```
 
-Output in `opentherm/build/`: `opentherm.elf`, `.hex`, `.bin` and `.map`, with the LPC boot checksum already patched in.
+Output in `opentherm/build/`: `opentherm.elf`, `.hex`, `.bin` and `.map`, with the LPC boot checksum and the image info already patched in.
+
+Build `opentherm/` before `gateway/`: the gateway build embeds `opentherm/build/opentherm.bin` when it exists, and warns and leaves the module alone when it does not (`-DPCB1246_FIRMWARE=<path>` points it elsewhere).
+
+## Release
+
+Push a tag `vX.Y.Z` (or `vX.Y.Z-rc.N` for a pre-release). `.github/workflows/release.yml` builds both boards, checks that both report the tag's version, and publishes the gateway app and factory images plus the PCB1246 `.bin`/`.hex`. Running the workflow by hand builds the same files as artifacts without releasing.

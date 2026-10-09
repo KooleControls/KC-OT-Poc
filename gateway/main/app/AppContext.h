@@ -7,6 +7,7 @@
 #include "NetworkManager.h"
 #include "DeviceDoc.h"
 #include "LedManager/LedManager.h"
+#include "ModuleFirmwareManager/ModuleFirmwareManager.h"
 
 // The application layer's context: owns this product's managers and answers AppProvider.
 //
@@ -43,15 +44,20 @@ public:
         strux_.getNetworkManager().AttachEthernet(board_.GetEthernet());
 
         ledManager_.Init();
+
+        // Starts checking the PCB1246 on a task of its own; nothing here waits for it.
+        moduleFirmwareManager_.Init();
     }
 
     StruxProvider& getStrux() override { return strux_; }
     BoardContext& getBoard() override { return board_; }
     LedManager& getLedManager() override { return ledManager_; }
+    ModuleFirmwareManager& getModuleFirmwareManager() override { return moduleFirmwareManager_; }
 
 private:
     BoardContext& board_;
     StruxProvider& strux_;
 
     LedManager ledManager_{*this};
+    ModuleFirmwareManager moduleFirmwareManager_{*this};
 };
