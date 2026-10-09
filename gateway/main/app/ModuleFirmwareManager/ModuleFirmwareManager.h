@@ -5,6 +5,7 @@
 #include "CommandEntry.h"
 #include "TypedSettings.h"
 #include "Task.h"
+#include "RecursiveMutex.h"
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -77,6 +78,17 @@ public:
     /// False while a check is already running.
     bool RequestUpdate(bool force);
 
+    /// The module's UART has two users: this manager, for the length of an ISP
+    /// session, and ModuleLinkManager, for everything else. Whoever talks on it holds
+    /// this; a session holds it from the reset into ISP until the reset out of it, so
+    /// nothing else can put a byte on the line while the boot ROM is listening.
+    /// The link takes it to send, and to ask whether the line is still its own.
+    RecursiveMutex& UartMutex() { return uartMutex_; }
+
+    /// How many ISP sessions there have been. Each one restarts the module, so a user
+    /// of the link that sees this change knows everything it had settled is gone.
+    uint32_t IspSessions() const { return ispSessions_.load(); }
+
 private:
     // Where the image info sits and how much of it is compared. ImageInfo.c on the
     // PCB1246 side is the other half of this.
@@ -98,6 +110,8 @@ private:
     std::atomic<State> state_{ State::NoImage };
     std::atomic<bool> force_{ false };
     std::atomic<uint32_t> pagesDone_{ 0 };
+    std::atomic<uint32_t> ispSessions_{ 0 };
+    RecursiveMutex uartMutex_;
     uint32_t pagesTotal_ = 0;
 
     // What went wrong last, for `module status`: the ISP step and its return code.

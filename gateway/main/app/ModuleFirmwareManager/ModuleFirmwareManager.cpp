@@ -146,6 +146,7 @@ void ModuleFirmwareManager::TaskLoop()
 
 void ModuleFirmwareManager::EnterIsp()
 {
+    ispSessions_++;
     OpenThermModule& module = app_.getBoard().GetOpenThermModule();
     module.SetIsp(true);
     module.SetReset(true);
@@ -169,6 +170,9 @@ void ModuleFirmwareManager::Run(bool force)
 {
     state_ = State::Checking;
     pagesDone_ = 0;
+
+    // The whole session, from the reset into ISP to the reset out of it.
+    LOCK(uartMutex_);
 
     LpcIsp isp(app_.getBoard().GetOpenThermModule().Serial());
     auto fail = [&](State s) {

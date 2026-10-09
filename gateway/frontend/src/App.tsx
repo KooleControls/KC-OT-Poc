@@ -7,12 +7,15 @@ import ConsolePage from "@/pages/ConsolePage"
 import CommandsPage from "@/pages/CommandsPage"
 import SettingsPage from "@/pages/SettingsPage"
 import FirmwarePage from "@/pages/FirmwarePage"
+import OpenThermPage from "@/pages/OpenThermPage"
 import LoginPage from "@/pages/LoginPage"
 
 function PageContent({ page }: { page: Page }) {
   switch (page) {
     case "home":
       return <HomePage />
+    case "opentherm":
+      return <OpenThermPage />
     case "console":
       return <ConsolePage />
     case "commands":

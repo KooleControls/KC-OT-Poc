@@ -744,6 +744,23 @@ class BackendService {
     return this.send<LedState>("led get")
   }
 
+  // ── The PCB1246 OpenTherm module ───────────────────────────────
+
+  /** The frames that crossed the module after `after` (a seq), oldest first. */
+  async getModuleFrames(after: number): Promise<ModuleFramesReply> {
+    return this.send<ModuleFramesReply>("module frames", { after })
+  }
+
+  /** The gateway's serial link to the module. */
+  async getModuleLink(): Promise<ModuleLinkState> {
+    return this.send<ModuleLinkState>("module link")
+  }
+
+  /** Put one frame on one of the module's lines. */
+  async sendModuleFrame(side: OpenThermSide, frame: number): Promise<{ ok: boolean; error?: string }> {
+    return this.send<{ ok: boolean; error?: string }>("module send", { side, frame })
+  }
+
   /** Turns the link indication on or off. Omitted fields are left alone by the
    *  device, so `{}` is a no-op that still reports the current state. */
   async setLed(params: { enabled?: boolean }): Promise<LedState> {
@@ -1055,6 +1072,42 @@ export interface DeviceInfo {
   heapFree: number
   heapMin: number
   deviceTime: string
+}
+
+// ── The PCB1246 OpenTherm module (ModuleLinkManager) ─────────────────────────
+
+export type OpenThermSide = "thermostat" | "boiler"
+
+/** One frame that crossed the module. */
+export interface ModuleFrame {
+  /** The gateway's numbering: from 1, gap-free, restarting with the gateway. */
+  seq: number
+  side: OpenThermSide
+  /** rx: off the line, from the thermostat or boiler. tx: put on the line by the gateway. */
+  dir: "rx" | "tx"
+  /** The 32 bits on the line, parity included. */
+  frame: number
+  /** The gateway's clock (ms since boot) when it recorded the frame. */
+  ms: number
+  /** The module's clock when it collected the frame; rx only. */
+  moduleMs?: number
+}
+
+export interface ModuleFramesReply {
+  /** The newest seq the gateway holds. Below the cursor asked with: it restarted. */
+  latest: number
+  /** Frames after the cursor that had already left the gateway's ring. */
+  missed: number
+  /** Whether the link to the module is up right now. */
+  link: boolean
+  frames: ModuleFrame[]
+}
+
+export interface ModuleLinkState {
+  phase: "handshake" | "ready" | "failed" | "paused"
+  stream: boolean
+  framesRecorded: number
+  counters: Record<string, number>
 }
 
 // ── The LED, this template's worked example ──────────────────────────────────

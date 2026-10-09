@@ -1,6 +1,6 @@
 # KC-OT-Poc
 
-Proof of concept for OpenTherm on the KC1245 gateway and the PCB1246 OpenTherm plug-in board, rebuilt from scratch on the Strux framework. Lives at [KooleControls/KC-OT-Poc](https://github.com/KooleControls/KC-OT-Poc) (private).
+Proof of concept for OpenTherm on the KC1245 gateway and the PCB1246 OpenTherm plug-in board, rebuilt from scratch on the Strux framework. Lives at [KooleControls/KC-OT-Poc](https://github.com/KooleControls/KC-OT-Poc).
 
 - `gateway/`: ESP32 firmware for the KC1245 gateway. A copy of [Strux](https://github.com/vanBassum/Strux) at commit `3c2e4ca`.
 - `opentherm/`: LPC11U68 firmware for the PCB1246 (bare metal, no RTOS, Strux-style). Laid out like the gateway: the board, the Strux command/settings/system managers, and the OpenTherm modem with its link to the gateway.
@@ -13,6 +13,7 @@ Decided so far:
 - On the UART, each channel frame is COBS-framed with a CRC-16: `0x00 | COBS(frame | crc16) | 0x00`. A frame that fails the check is dropped and counted. The code is `lib/protocol/SerialFraming.h`, meant to be the same file on both sides.
 - The PCB1246 is a modem and does not look inside a frame. Frames from either line go to the gateway on a stream the PCB1246 opens (`opentherm stream`); the gateway sends with `opentherm send side=<thermostat|boiler> frame=<uint32>`. Everything else is the gateway's.
 - The gateway keeps the PCB1246's firmware up to date. A release builds `opentherm/` first and links its `.bin` into the gateway app, so one gateway OTA updates both boards. At boot, `ModuleFirmwareManager` resets the module into its ISP bootloader and compares the 32-byte image info at 0x300 (version, length, CRC-32, written by `tools/lpc_image_info.py`) with the image it carries. On a mismatch it flashes, with page 0 written last. `module status` / `module update`; the `module.update` setting turns the boot check off.
+- The gateway's end of the modem link is `ModuleLinkManager`. It runs the same framing and handshake as the module, sends `opentherm send` requests, and records the module's frame stream, plus what it sent, in a ring of the last 256 frames. The web UI's OpenTherm page polls that ring with `module frames after=<seq>`, decodes each frame for display (`frontend/src/lib/opentherm.ts`), and can compose and send one. The module's UART is shared with `ModuleFirmwareManager` under its lock; after every ISP session the link starts over.
 - What the proof of concept does with OpenTherm is still open.
 
 ## Build

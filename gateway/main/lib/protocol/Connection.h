@@ -80,6 +80,65 @@ inline bool SendHandshake(ConnectionState& state, Transport& link, uint64_t mixI
     return SendFrame(link, 0, channel::FLAG_CONTROL, payload, sizeof(payload));
 }
 
+/// The peer's handshake: a CONTROL frame, in whatever phase this side is in.
+///
+/// A free function rather than Connection's alone because not every peer serves
+/// channels. Connection answers channels the peer OPENs; a client that only opens
+/// its own -- the gateway's side of the PCB1246 link -- still has to settle the id
+/// space, and must do it by exactly these rules or the two sides disagree.
+inline void OnHandshake(ConnectionState& state, Transport& link,
+                        const uint8_t* payload, size_t len)
+{
+    if (len < channel::HANDSHAKE_LEN)
+    {
+        ESP_LOGW(CONNECTION_TAG, "short CONTROL frame (%u) - ignored",
+                 static_cast<unsigned>(len));
+        return;
+    }
+
+    if (state.phase == ConnectionState::Phase::Ready)
+    {
+        // The peer restarted underneath us. On a socket the transport would
+        // have told us; on UART there is no such event, so this frame is the
+        // strongest signal there is. Drop everything and handshake again.
+        ESP_LOGW(CONNECTION_TAG, "peer restarted - re-handshaking");
+        state.Reset();
+        SendHandshake(state, link);
+    }
+
+    const uint8_t version = payload[0];
+    if (version != channel::PROTOCOL_VERSION)
+    {
+        ESP_LOGE(CONNECTION_TAG,
+                 "protocol version %u, this firmware speaks %u - closing",
+                 static_cast<unsigned>(version),
+                 static_cast<unsigned>(channel::PROTOCOL_VERSION));
+        state.phase = ConnectionState::Phase::Failed;
+        return;
+    }
+
+    const uint64_t peer = channel::readU64(payload + 1);
+    if (!state.Settle(peer))
+    {
+        if (state.attempts >= channel::MAX_HANDSHAKE_ATTEMPTS)
+        {
+            ESP_LOGE(CONNECTION_TAG, "nonce collision %u times - giving up",
+                     static_cast<unsigned>(state.attempts));
+            state.phase = ConnectionState::Phase::Failed;
+            return;
+        }
+        // Mix the peer's nonce in, so two boards with identical RNG state
+        // diverge instead of colliding identically again.
+        ESP_LOGW(CONNECTION_TAG, "nonce collision - redrawing");
+        SendHandshake(state, link, peer);
+        return;
+    }
+
+    state.phase = ConnectionState::Phase::Ready;
+    ESP_LOGI(CONNECTION_TAG, "ready, channels %s half",
+             state.lowHalf ? "low" : "high");
+}
+
 /// Open a device-initiated stream: OPEN carrying the envelope that names it, then
 /// nothing until a drain has something to push. No handler and no task -- the entry
 /// is Passive, which is all "channel != execution context" means in practice.
@@ -195,54 +254,7 @@ public:
 private:
     void OnControl(const uint8_t* payload, size_t len)
     {
-        if (len < channel::HANDSHAKE_LEN)
-        {
-            ESP_LOGW(CONNECTION_TAG, "short CONTROL frame (%u) - ignored",
-                     static_cast<unsigned>(len));
-            return;
-        }
-
-        if (state_.phase == ConnectionState::Phase::Ready)
-        {
-            // The peer restarted underneath us. On a socket the transport would
-            // have told us; on UART there is no such event, so this frame is the
-            // strongest signal there is. Drop everything and handshake again.
-            ESP_LOGW(CONNECTION_TAG, "peer restarted - re-handshaking");
-            state_.Reset();
-            SendHandshake(state_, link_);
-        }
-
-        const uint8_t version = payload[0];
-        if (version != channel::PROTOCOL_VERSION)
-        {
-            ESP_LOGE(CONNECTION_TAG,
-                     "protocol version %u, this firmware speaks %u - closing",
-                     static_cast<unsigned>(version),
-                     static_cast<unsigned>(channel::PROTOCOL_VERSION));
-            state_.phase = ConnectionState::Phase::Failed;
-            return;
-        }
-
-        const uint64_t peer = channel::readU64(payload + 1);
-        if (!state_.Settle(peer))
-        {
-            if (state_.attempts >= channel::MAX_HANDSHAKE_ATTEMPTS)
-            {
-                ESP_LOGE(CONNECTION_TAG, "nonce collision %u times - giving up",
-                         static_cast<unsigned>(state_.attempts));
-                state_.phase = ConnectionState::Phase::Failed;
-                return;
-            }
-            // Mix the peer's nonce in, so two boards with identical RNG state
-            // diverge instead of colliding identically again.
-            ESP_LOGW(CONNECTION_TAG, "nonce collision - redrawing");
-            SendHandshake(state_, link_, peer);
-            return;
-        }
-
-        state_.phase = ConnectionState::Phase::Ready;
-        ESP_LOGI(CONNECTION_TAG, "ready, channels %s half",
-                 state_.lowHalf ? "low" : "high");
+        OnHandshake(state_, link_, payload, len);
     }
 
     /// A frame for another channel, arriving while a handler holds the transport.

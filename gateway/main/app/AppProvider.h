@@ -14,6 +14,7 @@ class BoardContext;
 class StruxProvider;
 class LedManager;
 class ModuleFirmwareManager;
+class ModuleLinkManager;
 
 class AppProvider
 {
@@ -27,4 +28,5 @@ public:
     // ── This application's own managers ──
     virtual LedManager& getLedManager() = 0;
     virtual ModuleFirmwareManager& getModuleFirmwareManager() = 0;
+    virtual ModuleLinkManager& getModuleLinkManager() = 0;
 };
