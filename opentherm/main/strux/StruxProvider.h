@@ -1,0 +1,30 @@
+#pragma once
+
+// What one Strux manager may reach for. The framework layer's provider: implemented by
+// StruxContext, handed to every manager at construction, and the only way a manager
+// finds a peer.
+//
+// Note what is NOT here: the BoardContext. The framework does not touch hardware, and that is
+// deliberate rather than incidental. Because there is no IBoard, a board only has to
+// provide what the code above it actually calls — so if Strux called GetLed(), every
+// board in every fork would owe an LED. Hardware belongs to the application, which has
+// the BoardContext through AppProvider.
+//
+// Also not here: the application. Nothing in Strux may reach up. When the framework
+// needs something from the application it is given it — the application registers a
+// command or a setting — and that inversion is what keeps the layers acyclic. A
+// StruxManager that wanted AppProvider& would be a design error, not a missing accessor.
+
+class CommandManager;
+class SettingsManager;
+class SystemManager;
+class TimeManager;
+
+class StruxProvider
+{
+public:
+    virtual CommandManager& getCommandManager() = 0;
+    virtual SettingsManager& getSettingsManager() = 0;
+    virtual SystemManager& getSystemManager() = 0;
+    virtual TimeManager& getTimeManager() = 0;
+};

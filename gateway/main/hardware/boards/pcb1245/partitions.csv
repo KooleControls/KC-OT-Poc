@@ -1,0 +1,17 @@
+# ESP-IDF Partition Table — PCB1245 (ESP32, 16 MB flash)
+#
+# This board's layout, not the project's. The application asks only for nvs,
+# otadata, phy_init and two app slots; how big they are is a property of this
+# flash, which is why the file lives here and the board's sdkconfig.defaults
+# names it.
+#
+# Two 4 MB app slots, the same size the KC1245 firmware uses. The rest of the
+# flash (0x820000 onwards) is left unallocated for data partitions the proof of
+# concept may need later.
+#
+# Name,     Type,   SubType,    Offset,     Size,       Flags
+nvs,        data,   nvs,        0x9000,     0x6000,
+otadata,    data,   ota,        0xf000,     0x2000,
+phy_init,   data,   phy,        0x11000,    0x1000,
+ota_0,      app,    ota_0,      0x20000,    0x400000,
+ota_1,      app,    ota_1,      0x420000,   0x400000,
